@@ -46,6 +46,8 @@ class Robot:
         for joint_idx, target_state in enumerate(target_joint_states):
             self.joint_states[joint_idx] = target_state
             # TODO implement the trajectories
+            # TODO save animation frames somewhere, and then the client requests a frame update,
+            # update robot state and then frontend displays the new state
 
     def move_inverse_kinematics(self, target_position: tuple[float, float, float], target_orientation: float=None):
         # TODO implement trajectories

@@ -19,15 +19,17 @@ async def websocket_handler(websocket, robot):
     connected_clients.add(websocket)
     try:
         async for message in websocket:
+            print(f"Received message: {message}")
             command = message.split(" ")
-            if command[0] == "fk":
+            command_type = command[0]
+            if command_type == "fk":
                 target_joint_states = list(map(float, command[1:]))
                 print("Fk command received.")
                 print(f"Target joint angles: {target_joint_states}")
                 robot.move_forward_kinematics(target_joint_states)
                 await websocket.send(f"FK command executed.")
 
-            if command[0] == "ik":
+            if command_type == "ik":
                 ik_command = command [1::]
                 if len(ik_command) == 4:
                     target_orientation = float(ik_command[-1])
@@ -41,7 +43,7 @@ async def websocket_handler(websocket, robot):
                 robot.move_inverse_kinematics(target_position=target_ee_position, target_orientation=target_orientation)
                 await websocket.send(f"IK command executed.")
 
-            if command[0] == "base":
+            if command_type == "base":
                 base_move_command = command[1::]
                 if len(base_move_command) == 3:
                     target_base_position = list(map(float, base_move_command[0:2]))
@@ -51,6 +53,9 @@ async def websocket_handler(websocket, robot):
                     maintain_ee = True
                 robot.move_base(new_position=target_base_position, maintain_ee=maintain_ee)
                 await websocket.send(f"Move base command executed")
+
+            else:
+                print(f"Unrecognised command: {command_type}")
 
     except websockets.exceptions.ConnectionClosed as e:
         print(f"Client disconnected: {e}")
