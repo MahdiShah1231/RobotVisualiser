@@ -16,13 +16,13 @@ class TrajectoryBase(ABC):
         self._setpoints = []
 
     def setup_trajectory(self,
-                         waypoints: list[tuple[float, float, float]] | list[float],
+                         waypoints: tuple[float, float],
                          time: float = 3.0,
                          frequency: int = 60) -> None:
         """Set up the trajectory waypoints.
 
         Args:
-            waypoints: The trajectory waypoints.
+            waypoints: The trajectory waypoints. Start and End value for single coordinate/joint angle (one at a time).
             time: The time taken to complete the trajectory.
             frequency: The sampling frequency of the trajectory points.
         """
