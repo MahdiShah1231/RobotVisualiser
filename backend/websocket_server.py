@@ -14,7 +14,7 @@ async def send_robot_states(robot):
         message = f"JointStates: {joint_states};BasePosition: {base_position}"
         await asyncio.gather(*(client.send(message) for client in connected_clients))
 
-        # 10 Hz broadcast
+        # 50 Hz broadcast
         # TODO experiment and change
         await asyncio.sleep(0.02)
 
@@ -44,15 +44,10 @@ async def websocket_handler(websocket, robot):
                 print(f"Target end effector position: {target_ee_position}")
                 robot.move_inverse_kinematics(target_position=target_ee_position, target_orientation=target_orientation, animate=True)
             elif command_type == "base":
-                # TODO enable maintain ee
-                # 3rd element should be the boolean state of a checkbox, and we always read it so no need for if statement
                 base_move_command = command[1::]
-                if len(base_move_command) == 3:
-                    target_base_position = list(map(float, base_move_command[0:2]))
-                    maintain_ee = bool(base_move_command[-1])
-                else:
-                    target_base_position = list(map(float, base_move_command))
-                    maintain_ee = False
+                target_base_position = list(map(float, base_move_command[0:2]))
+                maintain_ee = base_move_command[-1] == "true"
+
                 print(f"Move base command received.")
                 print(f"Target base position: {target_base_position}")
                 robot.move_base(new_position=target_base_position, maintain_ee=maintain_ee, animate=True)

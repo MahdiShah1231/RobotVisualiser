@@ -70,9 +70,13 @@ class Robot:
             fk_target = [base_angle, lift_state, elbow_angle, wrist_angle]
             self.generate_trajectory(fk_target, 'fk')
 
-    def calculate_inverse_kinematics(self, target_position: tuple[float, float], target_orientation: float=None):
+    def calculate_inverse_kinematics(self, target_position: tuple[float, float], target_orientation: float=None, base_position=None):
         # Check target validity
-        relative_target = np.subtract(target_position, self.base_position[0:2])
+        if base_position is None:
+            base_position = self.base_position[0:2]
+        else:
+            base_position = base_position[0:2]
+        relative_target = np.subtract(target_position, base_position)
         target_distance = np.linalg.norm(relative_target)
         if target_distance > sum(self.arm_link_lengths):
             # TODO check if target is too close to base
@@ -137,22 +141,15 @@ class Robot:
         return self.joint_states
 
     def execute_traj(self):
-        traj_not_empty = [len(traj_points) > 0 for traj_points in [self.trajectory_points["base"], self.trajectory_points["joints"]]]
-        ## Execute base movement first, then manipulator
-        ## TODO do them together so maintain ee works
-        if any(traj_not_empty):
-            base_traj_points = self.trajectory_points["base"]
-            joint_traj_points = self.trajectory_points["joints"]
-            if len(base_traj_points) > 0:
-                self.base_position = base_traj_points.pop(0)
-                return
-            else:
-                # TODO make sure the length of joint traj is exactly what is expected
-                # always send the full traj even if we dont move one joint
-                # except gripper joint state
-                if len(joint_traj_points) > 0:
-                    self.joint_states = joint_traj_points.pop(0)
-                    return
+        base_traj_points = self.trajectory_points["base"]
+        joint_traj_points = self.trajectory_points["joints"]
+        if len(base_traj_points) > 0:
+            self.base_position = base_traj_points.pop(0)
+        if len(joint_traj_points) > 0:
+            # TODO make sure the length of joint traj is exactly what is expected
+            # always send the full traj even if we dont move one joint
+            # except gripper joint state
+            self.joint_states = joint_traj_points.pop(0)
 
     def get_robot_state(self):
         self.execute_traj()
@@ -164,8 +161,7 @@ class Robot:
         *_, ee = self.get_arm_joint_positions()
         return ee
 
-    # TODO merge with generate_traj()? or wrapper
-    def generate_base_traj(self, target_position):
+    def generate_base_traj(self, target_position, ee_target_position=None, ee_target_orientation=None):
         # Assuming base only moves on x,y for simplicity
         self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[0], target_position[0]))
         t, x_traj = self.trajectory_generator.solve_traj()
@@ -176,30 +172,37 @@ class Robot:
         z_traj = [0.0] * len(y_traj)
 
         traj = list(zip(x_traj, y_traj, z_traj))
+        instant_traj = []
+        if ee_target_position:
+            # For each base position, calculate the joint angles using IK to maintain EE position
+            # For simplicity using instantaneous points
+            for base_pos in traj:
+                base_angle, elbow_angle, wrist_angle = self.calculate_inverse_kinematics(ee_target_position[0:2], ee_target_orientation, base_position=base_pos)
+                lift_state = ee_target_position[2] + self.wrist_vertical_offset + self.gripper_vertical_offset
+                instant_joint_targets = [base_angle, lift_state, elbow_angle, wrist_angle]
+                instant_traj.append(instant_joint_targets)
+
         self.trajectory_points["base"] = traj
+        self.trajectory_points["joints"] = instant_traj
 
     def move_base(self, new_position: tuple[float, float], maintain_ee: bool=False, animate=False):
         # Assume base only moves in a planar motion
         # For simplicity, the base has no orientation and thus can move in any direction without turning
-        # TODO handle maintain ee in traj (change execute traj to allow both to be done together)
-        if maintain_ee:
-            ee_ik_target = self.get_ee_position()
-            target_orientation = self.joint_states[0] + self.joint_states[2] + self.joint_states[3]
-
+        # TODO need to check base final position leaves ee in range of target pose
         if animate:
-            self.generate_base_traj(new_position)
+            ee_ik_target = None
+            ee_ik_target_orientation = None
+            if maintain_ee:
+                ee_ik_target = self.get_ee_position()
+                ee_ik_target_orientation = self.joint_states[0] + self.joint_states[2] + self.joint_states[3]
+            self.generate_base_traj(new_position, ee_ik_target, ee_ik_target_orientation)
         else:
             self.base_position[0] = new_position[0]
             self.base_position[1] = new_position[1]
             self.base_position[2] = 0.0
 
-        # TODO handle maintain ee in traj
-        if maintain_ee:
-            self.move_inverse_kinematics(ee_ik_target, target_orientation)
-
     def get_base_position(self):
         return self.base_position
-
 
     def actuate_gripper(self, desired_state: int):
         # 0 = open
