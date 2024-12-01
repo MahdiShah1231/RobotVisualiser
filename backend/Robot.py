@@ -19,10 +19,10 @@ class Robot:
                  joint_max_accs=None):
         self.arm_link_lengths = arm_link_lengths
         self.n_arm_links = len(arm_link_lengths)
-        self.n_joints = 5
+        self.n_joints = 4  # Base, lift, elbow, wrist
         self.joint_states = [0.0] * self.n_joints
-        self.wrist_vertical_offset = 0.5 # 0.2m below the elbow
-        self.gripper_vertical_offset = 0.2  # 0.5m below the lift and J1 origin
+        self.wrist_vertical_offset = 0.1 # 0.1m below the elbow
+        self.gripper_vertical_offset = 0.1  # 0.1m below the lift and J1 origin
         self.base_position = [0.0, 0.0, 0.0]
         self.trajectory_points = {"base": [], "joints": []}
         self.trajectory_generator = QuinticPolynomialTrajectory()
@@ -44,7 +44,6 @@ class Robot:
         self.trajectory_points["joints"] = traj
         return traj
 
-    # TODO remove gripper from FK command
     def move_forward_kinematics(self, target_joint_states, animate=False):
         if len(target_joint_states) > self.n_joints:
             print(f"Error. Too many joint states ({len(target_joint_states)} for robot with {self.n_joints} joints")
@@ -77,10 +76,11 @@ class Robot:
         else:
             base_position = base_position[0:2]
         relative_target = np.subtract(target_position, base_position)
-        target_distance = np.linalg.norm(relative_target)
+        target_distance = np.around(np.linalg.norm(relative_target), 5)
         if target_distance > sum(self.arm_link_lengths):
             # TODO check if target is too close to base
-            raise ValueError(f"Invalid IK target {target_position} with link lengths {self.arm_link_lengths}")
+            print(f"Error. Invalid IK target {target_position}, distance: {target_distance}, max reach: {sum(self.arm_link_lengths)}")
+            return self.joint_states[0], self.joint_states[2], self.joint_states[3]
 
         # Now set the base and elbow joints to set the wrist centre
         # If no target_orientation is given, assume 0 degree approach (approach from left to right)
@@ -95,9 +95,12 @@ class Robot:
         # wrist centre position kinematics:
         # using cosine rule
         cos_theta_2 = (wrist_centre_distance ** 2 - self.arm_link_lengths[0] ** 2 - self.arm_link_lengths[1] ** 2) / (2 * self.arm_link_lengths[0] * self.arm_link_lengths[1])
+        cos_theta_2 = np.clip(cos_theta_2, -1.0, 1.0)
         theta_2 = np.arccos(cos_theta_2)
         angle_to_wrist = np.arctan2(wrist_centre_point[1], wrist_centre_point[0])
-        angle = np.arccos((self.arm_link_lengths[0]**2 + wrist_centre_distance**2 - self.arm_link_lengths[1]**2) / (2 * self.arm_link_lengths[0] * wrist_centre_distance))
+        cos_angle = (self.arm_link_lengths[0]**2 + wrist_centre_distance**2 - self.arm_link_lengths[1]**2) / (2 * self.arm_link_lengths[0] * wrist_centre_distance)
+        cos_angle = np.clip(cos_angle, -1.0, 1.0)
+        angle = np.arccos(cos_angle)
         theta_1 = angle_to_wrist - angle
 
         ## This is the wrist joint
@@ -146,9 +149,6 @@ class Robot:
         if len(base_traj_points) > 0:
             self.base_position = base_traj_points.pop(0)
         if len(joint_traj_points) > 0:
-            # TODO make sure the length of joint traj is exactly what is expected
-            # always send the full traj even if we dont move one joint
-            # except gripper joint state
             self.joint_states = joint_traj_points.pop(0)
 
     def get_robot_state(self):
@@ -159,6 +159,7 @@ class Robot:
     def get_ee_position(self):
         # Get ee position relative to the base
         *_, ee = self.get_arm_joint_positions()
+        ee = [np.around(val, 5) for val in ee]
         return ee
 
     def generate_base_traj(self, target_position, ee_target_position=None, ee_target_orientation=None):
