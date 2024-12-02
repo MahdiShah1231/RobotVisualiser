@@ -8,7 +8,7 @@ After setting up the python shell, run `python Robot.py`, after configuring the 
 at the bottom of the file.
 
 ### Testing backend (WebSocket)
-Run `python websocket_server.py`
+Run `python websocket_server.py`, configure the robot parameters at the bottom.
 #### Using python client
 In another terminal, run `python websocket_client.py`, after configuring the commands you want to send
 in the client file.
