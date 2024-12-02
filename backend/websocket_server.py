@@ -8,9 +8,7 @@ connected_clients = set()
 async def send_robot_states(robot):
     while True:
         base_position, joint_states = robot.get_robot_state()
-        # joint_states = robot.get_joint_states()
         joint_states = ",".join(map(str,joint_states))
-        # base_position = robot.get_base_position()
         base_position = ",".join(map(str, base_position))
         message = f"JointStates: {joint_states};BasePosition: {base_position}"
         await asyncio.gather(*(client.send(message) for client in connected_clients))

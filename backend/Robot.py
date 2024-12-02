@@ -39,7 +39,6 @@ class Robot:
             base_max_vel: Velocity limit for the base. Single float.
             base_max_acc: Acceleration limit for the base. Single float. 
         """
-    # TODO implement joint angle limits in the config
     # TODO have a robot config.yaml and load it in backend and frontend for easy config
 
     def get_joint_positions(self) -> tuple[list[float], list[float], list[float], list[float], list[float]]:
