@@ -8,13 +8,17 @@ After setting up the python shell, run `python Robot.py`, after configuring the 
 at the bottom of the file.
 
 ### Testing backend (WebSocket)
-Run `python websocket_server.py`  
+Run `python websocket_server.py`
+#### Using python client
 In another terminal, run `python websocket_client.py`, after configuring the commands you want to send
 in the client file.
+#### Using Web UI
+Open a terminal to where the front end folder directory is, and run `npm run dev`, then open browser
+and go to http://localhost:3000
 
 ## Backend
-Features IK and FK control for the mobile platform. It can be tested by setting up
-the python pipenv environment and then just running the Robot.py file.
+Features IK and FK control for the mobile platform. Uses a python websocket server
+to communicate with the frontend to display the robot state on the 3D web UI.
 
 ### Key Functions
 #### move_inverse_kinematics(target_position, target_orientation)
@@ -37,6 +41,5 @@ Plots the current robot state. Call this after sending some of the above command
 to see how the robot state changes. It is not animated with trajectories.
 
 ## Frontend
-Frontend is not working and has not been finished due to time constraints unfortunately.  
-Currently the basic layout of the web page is setup, with a simple render of the robot state,
-as well as an interface to allow IK and FK commands to be sent to the backend websocket Server (works)
+Basic UI to allow interaction with the backend to send joint space (FK) and cartesian space (IK) commands to the robot.
+Can also send commands to move the mobile base.
