@@ -22,7 +22,7 @@ async def client():
         # await websocket.send(f"ik 0.6 0.2 0.8 {np.pi/2}")
 
         ## Send move base
-        await websocket.send(f"base 0.2 0.0 0")
+        # await websocket.send(f"base 0.0 0.1 true")
 
         response = await websocket.recv()
         print(f"Server response: {response}")
