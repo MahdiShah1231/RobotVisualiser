@@ -14,13 +14,18 @@ class Joints(Enum):
 class Robot:
     def __init__(self,
                  arm_link_lengths,
-                 joint_limits=None,
                  joint_max_vels=None,
-                 joint_max_accs=None):
+                 joint_max_accs=None,
+                 base_max_vel=None,
+                 base_max_acc=None):
         self.arm_link_lengths = arm_link_lengths
         self.n_arm_links = len(arm_link_lengths)
         self.n_joints = 4  # Base, lift, elbow, wrist
         self.joint_states = [0.0] * self.n_joints
+        self.joint_max_vels = joint_max_vels
+        self.joint_max_accs = joint_max_accs
+        self.base_max_vel = base_max_vel
+        self.base_max_acc = base_max_acc
         self.wrist_vertical_offset = 0.1 # 0.1m below the elbow
         self.gripper_vertical_offset = 0.1  # 0.1m below the lift and J1 origin
         self.base_position = [0.0, 0.0, 0.0]
@@ -31,16 +36,24 @@ class Robot:
 
     def generate_trajectory(self, target_joint_states, control_type='fk'):
         traj = []
+        max_traj_length = 0
         for joint_idx, target_joint_state in enumerate(target_joint_states):
             if control_type == 'fk':
-                self.trajectory_generator.setup_trajectory(waypoints=[self.joint_states[joint_idx], target_joint_state])
-                _, setpoints = self.trajectory_generator.solve_traj()
-                # TODO analyse the trajectory so find v(t) and if its too high at any point, then we increase traj_time
-                # and run again, do it inside the generator so we have a vel_limits etc in the setup traj and maybe solve_traj
-                # has a respect_limits=True
-                # TODO or set the time for each joint trajectory separately based on its joint speed assuming linear traj
+                self.trajectory_generator.setup_trajectory(
+                    waypoints=[self.joint_states[joint_idx], target_joint_state],
+                    vel_limit=self.joint_max_vels[joint_idx],
+                    acc_limit=self.joint_max_accs[joint_idx]
+                )
+                _, setpoints = self.trajectory_generator.solve_traj(respect_limits=True)
                 traj.append(setpoints)
-        traj = list(zip(*traj))
+                max_traj_length = max(max_traj_length, len(setpoints))  ## Need to find longest trajectory
+
+        # Pad shorter trajectories with their last value
+        padded_traj = []
+        for joint_traj in traj:
+            padded_traj.append(joint_traj + [joint_traj[-1]] * (max_traj_length - len(joint_traj)))
+
+        traj = list(zip(*padded_traj))
         self.trajectory_points["joints"] = traj
         return traj
 
@@ -164,11 +177,15 @@ class Robot:
 
     def generate_base_traj(self, target_position, ee_target_position=None, ee_target_orientation=None):
         # Assuming base only moves on x,y for simplicity
-        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[0], target_position[0]))
-        t, x_traj = self.trajectory_generator.solve_traj()
+        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[0], target_position[0]),
+                                                   vel_limit=self.base_max_vel,
+                                                   acc_limit=self.base_max_acc)
+        t, x_traj = self.trajectory_generator.solve_traj(respect_limits=True)
 
-        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[1], target_position[1]))
-        t, y_traj = self.trajectory_generator.solve_traj()
+        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[1], target_position[1]),
+                                                   vel_limit=self.base_max_vel,
+                                                   acc_limit=self.base_max_acc)
+        t, y_traj = self.trajectory_generator.solve_traj(respect_limits=True)
 
         z_traj = [0.0] * len(y_traj)
 
@@ -246,7 +263,7 @@ class Robot:
 
 if __name__ == '__main__':
     robot = Robot([0.3, 0.6, 0.2])
-    # robot.move_inverse_kinematics((0.6, 0.2, 0.8))
+    robot.move_inverse_kinematics((0.6, 0.3, 0.8))
     # robot.move_base([5.5, 0.0], False)
     # robot.move_forward_kinematics([0.0, 0.0, np.pi/2, np.pi/2, 0.0])
     robot.plot_state()

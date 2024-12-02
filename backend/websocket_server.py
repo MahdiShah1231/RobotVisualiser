@@ -2,6 +2,7 @@ import asyncio
 import websockets
 from Robot import Robot
 from functools import partial
+import numpy as np
 
 connected_clients = set()
 async def send_robot_states(robot):
@@ -61,7 +62,9 @@ async def websocket_handler(websocket, robot):
 
 async def main():
     # TODO allow configuration of robot from front end
-    robot = Robot([0.3, 0.6, 0.2])
+    robot = Robot(arm_link_lengths=[0.3, 0.6, 0.2],
+                  joint_max_vels=[np.pi/3, 0.5, np.pi/3, np.pi/3],
+                  joint_max_accs=[1.0, 1.0, 1.0, 1.0])
     websocket_handler_bound = partial(websocket_handler, robot=robot)
     server = await websockets.serve(websocket_handler_bound, "0.0.0.0", 8000)
     print("WebSocket server started on ws://0.0.0.0:8000")
