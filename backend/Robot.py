@@ -31,8 +31,55 @@ class Robot:
         self.base_position = [0.0, 0.0, 0.0]
         self.trajectory_points = {"base": [], "joints": []}
         self.trajectory_generator = QuinticPolynomialTrajectory()
-    # TODO implement joint limits in the config
-    # TODO have a robot config.yaml and load it in backend and frontend for consistency
+    # TODO implement joint angle limits in the config
+    # TODO have a robot config.yaml and load it in backend and frontend for easy config
+
+    def get_joint_positions(self):
+        base = self.base_position
+        vertical_lift = [self.base_position[0], self.base_position[1], self.joint_states[Joints.LIFT.value]]
+        elbow = [
+            self.base_position[0] + (self.arm_link_lengths[0] * np.cos(self.joint_states[Joints.BASE.value])),
+            self.base_position[1] + (self.arm_link_lengths[0] * np.sin(self.joint_states[Joints.BASE.value])),
+            self.joint_states[Joints.LIFT.value]
+        ]
+
+        wrist = [
+            elbow[0] + (self.arm_link_lengths[1] * np.cos(self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value])),
+            elbow[1] + (self.arm_link_lengths[1] * np.sin(self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value])),
+            (self.joint_states[Joints.LIFT.value] - self.wrist_vertical_offset)
+        ]
+
+        ee = [
+            wrist[0] + self.arm_link_lengths[2] * np.cos(
+                self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value] + self.joint_states[Joints.WRIST.value]
+            ),
+            wrist[1] + self.arm_link_lengths[2] * np.sin(
+                self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value] + self.joint_states[Joints.WRIST.value]
+            ),
+            (self.joint_states[Joints.LIFT.value] - self.wrist_vertical_offset - self.gripper_vertical_offset)
+        ]
+
+        return base, vertical_lift, elbow, wrist, ee
+
+    def get_arm_joint_positions(self):
+        *_, elbow, wrist, ee = self.get_joint_positions()
+        return elbow, wrist, ee
+
+    def get_ee_position(self):
+        # Get ee position relative to the base
+        *_, ee = self.get_arm_joint_positions()
+        ee = [np.around(val, 5) for val in ee]
+        return ee
+
+    def get_base_position(self):
+        return self.base_position
+
+    def get_joint_states(self):
+        return self.joint_states
+
+    def get_robot_state(self):
+        self.execute_traj()
+        return self.get_base_position(), self.get_joint_states()
 
     def generate_trajectory(self, target_joint_states, control_type='fk'):
         traj = []
@@ -57,30 +104,41 @@ class Robot:
         self.trajectory_points["joints"] = traj
         return traj
 
-    def move_forward_kinematics(self, target_joint_states, animate=False):
-        if len(target_joint_states) > self.n_joints:
-            print(f"Error. Too many joint states ({len(target_joint_states)} for robot with {self.n_joints} joints")
-            return
+    def generate_base_traj(self, target_position, ee_target_position=None, ee_target_orientation=None):
+        # Assuming base only moves on x,y for simplicity
+        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[0], target_position[0]),
+                                                   vel_limit=self.base_max_vel,
+                                                   acc_limit=self.base_max_acc)
+        t, x_traj = self.trajectory_generator.solve_traj(respect_limits=True)
 
-        if not animate:
-            for joint_idx, target_state in enumerate(target_joint_states):
-                self.joint_states[joint_idx] = target_state
-        else:
-            self.generate_trajectory(target_joint_states, 'fk')
+        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[1], target_position[1]),
+                                                   vel_limit=self.base_max_vel,
+                                                   acc_limit=self.base_max_acc)
+        t, y_traj = self.trajectory_generator.solve_traj(respect_limits=True)
 
-    def move_inverse_kinematics(self, target_position: tuple[float, float, float], target_orientation: float=None, animate=False):
-        # For IK trajectory simplicity, find joint angles at start and end, then generate polynomial traj between points in joint
-        # space. Quicker than generating polynomial traj in cartesian space and calling IK on each point
-        base_angle, elbow_angle, wrist_angle = self.calculate_inverse_kinematics(target_position[0:2], target_orientation)
-        lift_state = target_position[2] + self.wrist_vertical_offset + self.gripper_vertical_offset
-        if not animate:
-            self.joint_states[Joints.BASE.value] = base_angle
-            self.joint_states[Joints.LIFT.value] = lift_state
-            self.joint_states[Joints.ELBOW.value] = elbow_angle
-            self.joint_states[Joints.WRIST.value] = wrist_angle
-        else:
-            fk_target = [base_angle, lift_state, elbow_angle, wrist_angle]
-            self.generate_trajectory(fk_target, 'fk')
+        z_traj = [0.0] * len(y_traj)
+
+        traj = list(zip(x_traj, y_traj, z_traj))
+        instant_traj = []
+        if ee_target_position:
+            # For each base position, calculate the joint angles using IK to maintain EE position
+            # For simplicity using instantaneous points
+            for base_pos in traj:
+                base_angle, elbow_angle, wrist_angle = self.calculate_inverse_kinematics(ee_target_position[0:2], ee_target_orientation, base_position=base_pos)
+                lift_state = ee_target_position[2] + self.wrist_vertical_offset + self.gripper_vertical_offset
+                instant_joint_targets = [base_angle, lift_state, elbow_angle, wrist_angle]
+                instant_traj.append(instant_joint_targets)
+
+        self.trajectory_points["base"] = traj
+        self.trajectory_points["joints"] = instant_traj
+
+    def execute_traj(self):
+        base_traj_points = self.trajectory_points["base"]
+        joint_traj_points = self.trajectory_points["joints"]
+        if len(base_traj_points) > 0:
+            self.base_position = base_traj_points.pop(0)
+        if len(joint_traj_points) > 0:
+            self.joint_states = joint_traj_points.pop(0)
 
     def calculate_inverse_kinematics(self, target_position: tuple[float, float], target_orientation: float=None, base_position=None):
         # Check target validity
@@ -122,86 +180,30 @@ class Robot:
         # base, elbow, wrist
         return theta_1, theta_2, theta_3
 
-    def get_joint_positions(self):
-        base = self.base_position
-        vertical_lift = [self.base_position[0], self.base_position[1], self.joint_states[Joints.LIFT.value]]
-        elbow = [
-            self.base_position[0] + (self.arm_link_lengths[0] * np.cos(self.joint_states[Joints.BASE.value])),
-            self.base_position[1] + (self.arm_link_lengths[0] * np.sin(self.joint_states[Joints.BASE.value])),
-            self.joint_states[Joints.LIFT.value]
-        ]
+    def move_forward_kinematics(self, target_joint_states, animate=False):
+        if len(target_joint_states) > self.n_joints:
+            print(f"Error. Too many joint states ({len(target_joint_states)} for robot with {self.n_joints} joints")
+            return
 
-        wrist = [
-            elbow[0] + (self.arm_link_lengths[1] * np.cos(self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value])),
-            elbow[1] + (self.arm_link_lengths[1] * np.sin(self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value])),
-            (self.joint_states[Joints.LIFT.value] - self.wrist_vertical_offset)
-        ]
+        if not animate:
+            for joint_idx, target_state in enumerate(target_joint_states):
+                self.joint_states[joint_idx] = target_state
+        else:
+            self.generate_trajectory(target_joint_states, 'fk')
 
-        ee = [
-            wrist[0] + self.arm_link_lengths[2] * np.cos(
-                self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value] + self.joint_states[Joints.WRIST.value]
-            ),
-            wrist[1] + self.arm_link_lengths[2] * np.sin(
-                self.joint_states[Joints.BASE.value] + self.joint_states[Joints.ELBOW.value] + self.joint_states[Joints.WRIST.value]
-            ),
-            (self.joint_states[Joints.LIFT.value] - self.wrist_vertical_offset - self.gripper_vertical_offset)
-        ]
-
-        return base, vertical_lift, elbow, wrist, ee
-
-    def get_arm_joint_positions(self):
-        *_, elbow, wrist, ee = self.get_joint_positions()
-        return elbow, wrist, ee
-
-    def get_joint_states(self):
-        return self.joint_states
-
-    def execute_traj(self):
-        base_traj_points = self.trajectory_points["base"]
-        joint_traj_points = self.trajectory_points["joints"]
-        if len(base_traj_points) > 0:
-            self.base_position = base_traj_points.pop(0)
-        if len(joint_traj_points) > 0:
-            self.joint_states = joint_traj_points.pop(0)
-
-    def get_robot_state(self):
-        self.execute_traj()
-        return self.get_base_position(), self.get_joint_states()
-
-
-    def get_ee_position(self):
-        # Get ee position relative to the base
-        *_, ee = self.get_arm_joint_positions()
-        ee = [np.around(val, 5) for val in ee]
-        return ee
-
-    def generate_base_traj(self, target_position, ee_target_position=None, ee_target_orientation=None):
-        # Assuming base only moves on x,y for simplicity
-        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[0], target_position[0]),
-                                                   vel_limit=self.base_max_vel,
-                                                   acc_limit=self.base_max_acc)
-        t, x_traj = self.trajectory_generator.solve_traj(respect_limits=True)
-
-        self.trajectory_generator.setup_trajectory(waypoints=(self.base_position[1], target_position[1]),
-                                                   vel_limit=self.base_max_vel,
-                                                   acc_limit=self.base_max_acc)
-        t, y_traj = self.trajectory_generator.solve_traj(respect_limits=True)
-
-        z_traj = [0.0] * len(y_traj)
-
-        traj = list(zip(x_traj, y_traj, z_traj))
-        instant_traj = []
-        if ee_target_position:
-            # For each base position, calculate the joint angles using IK to maintain EE position
-            # For simplicity using instantaneous points
-            for base_pos in traj:
-                base_angle, elbow_angle, wrist_angle = self.calculate_inverse_kinematics(ee_target_position[0:2], ee_target_orientation, base_position=base_pos)
-                lift_state = ee_target_position[2] + self.wrist_vertical_offset + self.gripper_vertical_offset
-                instant_joint_targets = [base_angle, lift_state, elbow_angle, wrist_angle]
-                instant_traj.append(instant_joint_targets)
-
-        self.trajectory_points["base"] = traj
-        self.trajectory_points["joints"] = instant_traj
+    def move_inverse_kinematics(self, target_position: tuple[float, float, float], target_orientation: float=None, animate=False):
+        # For IK trajectory simplicity, find joint angles at start and end, then generate polynomial traj between points in joint
+        # space. Quicker than generating polynomial traj in cartesian space and calling IK on each point
+        base_angle, elbow_angle, wrist_angle = self.calculate_inverse_kinematics(target_position[0:2], target_orientation)
+        lift_state = target_position[2] + self.wrist_vertical_offset + self.gripper_vertical_offset
+        if not animate:
+            self.joint_states[Joints.BASE.value] = base_angle
+            self.joint_states[Joints.LIFT.value] = lift_state
+            self.joint_states[Joints.ELBOW.value] = elbow_angle
+            self.joint_states[Joints.WRIST.value] = wrist_angle
+        else:
+            fk_target = [base_angle, lift_state, elbow_angle, wrist_angle]
+            self.generate_trajectory(fk_target, 'fk')
 
     def move_base(self, new_position: tuple[float, float], maintain_ee: bool=False, animate=False):
         # Assume base only moves in a planar motion
@@ -218,9 +220,6 @@ class Robot:
             self.base_position[0] = new_position[0]
             self.base_position[1] = new_position[1]
             self.base_position[2] = 0.0
-
-    def get_base_position(self):
-        return self.base_position
 
     def actuate_gripper(self, desired_state: int):
         # 0 = open
